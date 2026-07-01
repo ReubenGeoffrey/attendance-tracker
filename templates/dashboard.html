@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Upload Excel files and process attendance shift data">
+  <title>Dashboard — Shift Processor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        Shift Processor
+      </div>
+      <div class="topbar-actions">
+        <div class="topbar-user">
+          <div class="avatar">A</div>
+          <span>{{ session.username }}</span>
+        </div>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline" style="padding: 0.45rem 1rem; font-size: 0.78rem;">Sign Out</a>
+      </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-messages">
+          {% for cat, msg in messages %}
+            <div class="flash flash-{{ cat }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <main class="main-content">
+
+      <!-- Header -->
+      <div class="page-header">
+        <h1>Attendance Shift Processor</h1>
+        <p>Upload your Excel files → Preview the processed data → Download the output</p>
+      </div>
+
+      <!-- Steps -->
+      <div class="steps">
+        <div class="step active" id="step-1">
+          <div class="step-num">1</div>
+          <span>Upload Files</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step" id="step-2">
+          <div class="step-num">2</div>
+          <span>Preview</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step" id="step-3">
+          <div class="step-num">3</div>
+          <span>Download</span>
+        </div>
+      </div>
+
+      <!-- Upload Section -->
+      <div class="upload-section" id="upload-section">
+        <div class="upload-grid">
+          <!-- Performance File -->
+          <div class="upload-card" id="card-performance">
+            <div class="upload-icon">📊</div>
+            <h3>Performance — OVERALL</h3>
+            <p class="upload-desc">Employee attendance, shifts, in/out times</p>
+            <div class="file-name" id="fname-performance">No file selected</div>
+            <input type="file" accept=".xlsx,.xls" id="file-performance"
+                   onchange="onFileSelect(this, 'performance')">
+          </div>
+
+          <!-- Scheme A -->
+          <div class="upload-card" id="card-scheme-a">
+            <div class="upload-icon">📋</div>
+            <h3>Scheme A</h3>
+            <p class="upload-desc">Scheme A efficiency data by employee</p>
+            <div class="file-name" id="fname-scheme-a">No file selected</div>
+            <input type="file" accept=".xlsx,.xls" id="file-scheme-a"
+                   onchange="onFileSelect(this, 'scheme-a')">
+          </div>
+
+          <!-- Scheme B -->
+          <div class="upload-card" id="card-scheme-b">
+            <div class="upload-icon">📈</div>
+            <h3>Scheme B</h3>
+            <p class="upload-desc">Scheme B curing efficiency by shift</p>
+            <div class="file-name" id="fname-scheme-b">No file selected</div>
+            <input type="file" accept=".xlsx,.xls" id="file-scheme-b"
+                   onchange="onFileSelect(this, 'scheme-b')">
+          </div>
+        </div>
+
+        <div class="upload-actions">
+          <button class="btn btn-primary btn-lg" id="btn-preview" onclick="doPreview()" disabled>
+            Preview Data
+          </button>
+          <button class="btn btn-success btn-lg" id="btn-download" onclick="doDownload()" disabled>
+            ↓ Download Excel
+          </button>
+        </div>
+      </div>
+
+      <!-- Processing -->
+      <div class="processing" id="processing">
+        <div class="spinner"></div>
+        <p id="processing-text">Processing 1,914 employees × 31 days...</p>
+      </div>
+
+      <!-- Preview Section -->
+      <div class="preview-section" id="preview-section">
+        <div class="tab-bar" id="tab-bar"></div>
+        <div id="tab-panels"></div>
+
+        <div class="upload-actions" style="margin-top: 1.5rem;">
+          <button class="btn btn-success btn-lg" onclick="doDownload()">
+            ↓ Download Processed Excel
+          </button>
+          <button class="btn btn-outline btn-lg" onclick="resetAll()">
+            ↻ Start Over
+          </button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+<script>
+const FILES = { performance: null, 'scheme-a': null, 'scheme-b': null };
+const SHEET_ORDER = ['SHIFT', 'A&B', 'CF', 'Sheet A', 'Sheet B', 'OP', 'CL', 'DAT'];
+const SHEET_ICONS = {
+  'SHIFT': '⏱', 'A&B': '🔗', 'CF': '⚙️', 'Sheet A': '📋',
+  'Sheet B': '📈', 'OP': '✅', 'CL': '📝', 'DAT': '📦'
+};
+
+function onFileSelect(input, key) {
+  const file = input.files[0];
+  const card = document.getElementById(`card-${key}`);
+  const fname = document.getElementById(`fname-${key}`);
+
+  if (file) {
+    FILES[key] = file;
+    card.classList.add('has-file');
+    fname.textContent = file.name;
+  } else {
+    FILES[key] = null;
+    card.classList.remove('has-file');
+    fname.textContent = 'No file selected';
+  }
+  updateButtons();
+}
+
+function updateButtons() {
+  const allSelected = FILES.performance && FILES['scheme-a'] && FILES['scheme-b'];
+  document.getElementById('btn-preview').disabled = !allSelected;
+  document.getElementById('btn-download').disabled = !allSelected;
+}
+
+function setStep(n) {
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById(`step-${i}`);
+    el.classList.remove('active', 'done');
+    if (i < n) el.classList.add('done');
+    else if (i === n) el.classList.add('active');
+  }
+}
+
+async function doPreview() {
+  const fd = new FormData();
+  fd.append('performance', FILES.performance);
+  fd.append('scheme_a', FILES['scheme-a']);
+  fd.append('scheme_b', FILES['scheme-b']);
+
+  document.getElementById('processing').classList.add('show');
+  document.getElementById('preview-section').classList.remove('show');
+  setStep(2);
+
+  try {
+    const resp = await fetch('/preview', { method: 'POST', body: fd });
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'Processing failed');
+    }
+    const data = await resp.json();
+    renderPreview(data);
+  } catch (e) {
+    alert('Error: ' + e.message);
+    setStep(1);
+  } finally {
+    document.getElementById('processing').classList.remove('show');
+  }
+}
+
+function renderPreview(data) {
+  const tabBar = document.getElementById('tab-bar');
+  const panels = document.getElementById('tab-panels');
+  tabBar.innerHTML = '';
+  panels.innerHTML = '';
+
+  let first = true;
+  for (const name of SHEET_ORDER) {
+    if (!data[name]) continue;
+    const sheet = data[name];
+    const icon = SHEET_ICONS[name] || '📄';
+
+    // Tab button
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn' + (first ? ' active' : '');
+    btn.innerHTML = `${icon} ${name} <span class="tab-count">${sheet.total.toLocaleString()}</span>`;
+    btn.onclick = () => switchTab(name);
+    btn.dataset.tab = name;
+    tabBar.appendChild(btn);
+
+    // Tab panel
+    const panel = document.createElement('div');
+    panel.className = 'tab-panel' + (first ? ' active' : '');
+    panel.id = `panel-${name}`;
+    panel.innerHTML = buildTable(sheet, name);
+    panels.appendChild(panel);
+
+    first = false;
+  }
+
+  document.getElementById('preview-section').classList.add('show');
+  setStep(2);
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === `panel-${name}`));
+}
+
+function buildTable(sheet, name) {
+  const { headers, rows, total } = sheet;
+  let html = `<div class="table-wrap">`;
+  html += `<div class="table-info"><span>Showing ${rows.length} of ${total.toLocaleString()} rows</span><span>${name}</span></div>`;
+  html += `<div class="table-scroll"><table><thead><tr>`;
+  for (const h of headers) {
+    html += `<th>${escHtml(String(h ?? ''))}</th>`;
+  }
+  html += `</tr></thead><tbody>`;
+  for (const row of rows) {
+    html += '<tr>';
+    for (const cell of row) {
+      let val = cell ?? '';
+      if (typeof val === 'number') val = Number.isInteger(val) ? val : val.toFixed(2);
+      html += `<td>${escHtml(String(val))}</td>`;
+    }
+    html += '</tr>';
+  }
+  if (rows.length === 0) {
+    html += `<tr><td colspan="${headers.length}" style="text-align:center;padding:2rem;color:var(--text-muted)">No data</td></tr>`;
+  }
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function escHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function doDownload() {
+  const fd = new FormData();
+  fd.append('performance', FILES.performance);
+  fd.append('scheme_a', FILES['scheme-a']);
+  fd.append('scheme_b', FILES['scheme-b']);
+
+  document.getElementById('processing').classList.add('show');
+  document.getElementById('processing-text').textContent = 'Generating Excel file...';
+  setStep(3);
+
+  fetch('/process', { method: 'POST', body: fd })
+    .then(resp => {
+      if (!resp.ok) throw new Error('Download failed');
+      return resp.blob();
+    })
+    .then(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Processed_Output_${new Date().toISOString().slice(0,10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      document.getElementById('processing').classList.remove('show');
+      setStep(3);
+    })
+    .catch(e => {
+      alert('Error: ' + e.message);
+      document.getElementById('processing').classList.remove('show');
+      setStep(1);
+    });
+}
+
+function resetAll() {
+  FILES.performance = null;
+  FILES['scheme-a'] = null;
+  FILES['scheme-b'] = null;
+
+  ['performance', 'scheme-a', 'scheme-b'].forEach(key => {
+    document.getElementById(`card-${key}`).classList.remove('has-file');
+    document.getElementById(`fname-${key}`).textContent = 'No file selected';
+    document.getElementById(`file-${key}`).value = '';
+  });
+
+  document.getElementById('preview-section').classList.remove('show');
+  updateButtons();
+  setStep(1);
+}
+</script>
+</body>
+</html>
