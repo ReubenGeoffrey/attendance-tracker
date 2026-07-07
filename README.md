@@ -1,0 +1,1 @@
+A full-stack web application that automates Excel file processing with a secure login dashboard. Built with Python (Flask/FastAPI) for backend processing, JavaScript for interactive frontend, and integrated with Excel via `openpyxl` and `pandas`.
